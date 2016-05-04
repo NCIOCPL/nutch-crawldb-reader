@@ -1,0 +1,31 @@
+{
+  "name": "crawldb-reader",
+  "version": "0.0.0",
+  "description": "Commandline App to Parse Nutch CrawlDB Dump",
+  "private": true,
+  "bin": {
+    "crawldb-reader": "./bin/crawldb-reader"
+  },
+  "scripts": {
+    "test": "mocha -R spec"
+  },
+  "author": {
+    "name": "Bryan Pizzillo",
+    "email": "",
+    "url": "."
+  },
+  "repository": {
+    "type": "git",
+    "url": "."
+  },
+  "license": "MIT",
+  "bugs": ".",
+  "dependencies": {
+    "autocmdr": "~0.0.7",
+    "commander": "~2.0.0",
+    "csv": "~0.4.6",
+    "lodash": "^3.10.1",
+    "node-csv": "~0.1.2"
+  },
+  "devDependencies": {}
+}

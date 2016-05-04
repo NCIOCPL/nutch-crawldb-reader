@@ -1,0 +1,560 @@
+#!/usr/bin/env node
+'use strict';
+
+var program  = require('commander');
+
+require('autocmdr/lib/logger')(program);
+require('autocmdr/lib/loader')(program);
+//require('autocmdr/lib/completion')(program);
+require('autocmdr/lib/package')(program);
+//require('autocmdr/lib/config')(program);
+require('autocmdr/lib/help')(program);
+
+var fs = require('fs');
+var readLine = require('readline');
+var url = require('url');
+
+
+//One of those inputs should be the file name
+//var filename = "data/nci_crawl_dump_slow4.txt";
+ 
+
+//Parse the inputs to the program
+program
+	.version('0.0.1');
+
+program
+	.command('printStatusCounts <filename>')
+	.description('Prints counts of the different statuses')
+	.action(function(filename) {
+		parseCrawlDump(filename, function(records) {
+			printStatusCounts(records);
+		});
+	});
+program	
+	.command('printStatusCountsByDomain <filename>')
+	.description('Print Status Counts by Domain')
+	.action(function(filename) {
+		parseCrawlDump(filename, function(records) {
+			printStatusCountsByDomain(records);
+		});
+	});
+program
+	.command('printDupes <filename>')
+	.description('Get dupes with their indexed (fetched) URL as well as the dupe URLs')
+	.action(function(filename) {
+		parseCrawlDump(filename, function(records) {
+			printDupes(records);
+		});
+	});
+program
+	.command('printPossibleBlockedDomains <filename>')
+	.description('Detect possible internal urls - only works with external crawler')
+	.action(function(filename) {
+		parseCrawlDump(filename, function(records) {
+			printPossibleBlockedDomains(records);
+		});
+	});
+program
+	.command('printUrls <filename>')
+	.option('-s --filterStatus <status>', 'Only Print URLs with the status.', function(val) {
+		return val.split(',');
+	})
+	.option('-h --filterHosts <hosts>', 'Only Print URLs for these hosts.', function(val) {
+		return val.split(',');
+	})
+	.description('Print out all the crawled URLs')
+	.action(function(filename, cmd) {
+		parseCrawlDump(filename, function(records) {
+
+			printUrls(
+				records, 
+				cmd.filterStatus ? cmd.filterStatus : [],
+				cmd.filterHosts ? cmd.filterHosts : []
+			);
+
+		});
+	});	
+program
+	.command('testParse <filename>')
+	.description('For testing')
+	.action(function(filename) {
+		parseCrawlDump(filename, function(records) {
+			console.log("complete");
+		});
+	});
+
+
+program.parse(process.argv);
+
+
+/***********************************************
+ *****       Functions Here                 ****
+ ***********************************************/
+
+//TODO: Get URLs by Status
+//TODO: Get URLs by Status filter by Host
+
+/**
+ * Parse all the records of a crawl db dump and run a callback function on completion
+ * @param  {[type]} filename          The filenaem of the crawldb dump
+ * @param  {[type]} completedCallback The callback to fire upon completion.  Takes records as an argument.
+ */
+function parseCrawlDump(filename, completedCallback) {
+
+	var records = [];
+	var recordBuffer = [];
+
+	// Create a readline interface to read the file
+	var readerInstance = readLine.createInterface({
+		input: fs.createReadStream(filename),
+		terminal: false
+	});
+
+	//Handle the close event indicating that we are done reading lines from the stream
+	readerInstance.on('close', function(){
+		//printStatusCounts(records);
+		//printStatusCountsByDomain(records);
+		//printDupes(records);
+		if (completedCallback) {
+			completedCallback(records);
+		}
+	});
+
+	//Handle the line event by reading the line
+	readerInstance.on('line', function (line) {
+		//An empty line indicates the record separator
+		if (line != "") {
+			recordBuffer.push(line);
+		} else {
+			records.push(parseRecord(recordBuffer));
+			recordBuffer = [];
+		}
+	});
+
+}
+
+
+/**
+ * Prints the counts of the number of records for each crawlDB Status (e.g db_fetched, db_unfetched)
+ * @param  {[type]} records An array of records
+ */
+function printStatusCounts(records) {
+	var statuses = {};
+	records.forEach(function(record){
+		if (statuses[record.Status])
+			statuses[record.Status]++;
+		else
+			statuses[record.Status] = 1;
+	});
+
+	for (var key in statuses) {
+		if (statuses.hasOwnProperty(key)) {
+			console.log(key + ": " + statuses[key]);
+		}
+	}
+}
+
+/**
+ * Prints the URLs within the crawled pages
+ * @param  {[type]} records An array of records
+ */
+function printUrls(records, statuses, hosts) {
+
+/*
+		URL: '',
+		Host: '',
+		Protocol: '',
+		StatusCode: -1,
+		Status: '',
+		FetchTime: new Date(),
+		ModifiedTime: new Date(),
+		Retries: -1,
+		RetryInterval: -1,
+		Score: -1,
+		Signature: null,
+		Metadata: {}
+
+ */
+
+	console.log(
+		[
+			"Host",
+			"Status",
+			"URL"
+		].join()
+	);
+
+	records.forEach(function(record) {
+
+		if (statuses.length != 0 && statuses.indexOf(record.Status) == -1) {
+			return;
+		}
+
+		if (hosts.length != 0 && hosts.indexOf(record.Host) == -1) {
+			return;
+		}
+
+		
+		console.log(
+			[
+				record.Host,
+				record.Status,
+				record.URL
+			].join()
+		);
+
+
+	});
+
+	/*
+	var statuses = {};
+	records.forEach(function(record){
+		if (statuses[record.Status])
+			statuses[record.Status]++;
+		else
+			statuses[record.Status] = 1;
+	});
+
+	for (var key in statuses) {
+		if (statuses.hasOwnProperty(key)) {
+			console.log(key + ": " + statuses[key]);
+		}
+	}
+	*/
+}
+
+
+/**
+ * Prints the counts of the number of records for each crawlDB Status (e.g. db_fetched, db_unfetched) by host
+ * @param  {[type]} records An array of records
+ */
+function printStatusCountsByDomain(records) {
+	var statuses = {};
+	records.forEach(function(record){
+		if (statuses[record.Status]) {
+			if (statuses[record.Status][record.Host])
+				statuses[record.Status][record.Host]++;
+			else
+				statuses[record.Status][record.Host] = 1;
+		} else {
+			statuses[record.Status] = {};
+			statuses[record.Status][record.Host] = 1;
+		}
+	});
+
+	console.log("status,host,number of pages");
+
+	for (var key in statuses) {
+		if (statuses.hasOwnProperty(key)) {
+			for (var host in statuses[key]) {
+				console.log(key + "," + host + "," + statuses[key][host]);
+			}
+		}
+	}
+}
+
+/**
+ * Prints the counts of the number of records for each crawlDB Status (e.g. db_fetched, db_unfetched) by host
+ * @param  {[type]} records An array of records
+ */
+function printPossibleBlockedDomains(records) {
+	var statuses = {};
+	records.forEach(function(record){
+		if (statuses[record.Status]) {
+			if (statuses[record.Status][record.Host])
+				statuses[record.Status][record.Host]++;
+			else
+				statuses[record.Status][record.Host] = 1;
+		} else {
+			statuses[record.Status] = {};
+			statuses[record.Status][record.Host] = 1;
+		}
+	});
+
+// Statuses for Domains to check
+// db_gone
+// db_unfetched
+// 
+// db_fetched
+// db_duplicate
+// db_notmodified
+// db_redir_perm
+// db_redir_temp
+
+	var accessible_statuses = [];
+	for (var status in statuses) {
+		if (statuses.hasOwnProperty(status) && status != "db_gone" && status != "db_unfetched") {
+			accessible_statuses.push(status);
+		}
+	}
+	var check_statuses = ["db_gone", "db_unfetched"];
+
+	for (var i = 0; i < check_statuses.length; i++ ) {
+		var key = check_statuses[i];
+
+		console.log("Status: " + key);
+
+		for (var host in statuses[key]) {
+
+			var found_host = false;
+
+			for ( var j = 0; j < accessible_statuses.length; j++) {
+				var goodstatus = accessible_statuses[j];
+
+				for (var testhost in statuses[goodstatus]) {
+					if (testhost == host) {
+						found_host = true;
+						break;
+					}
+				}
+
+				//We found the host, so break out of the status loop
+				if (found_host) {
+					break;
+				}
+			}
+
+			if (!found_host) {
+				console.log("\t" + host);
+			}
+		}
+	}
+}
+
+
+/**
+ * Prints out a report of the pages that have detected duplicates and the suspected duplicates
+ * @param  {[type]} records An array of records
+ */
+function printDupes(records) {
+	var dupes = {};
+
+	records.forEach(function(record) {
+
+		//These statuses would NOT have a signature as the page was not fetched...
+		if (record.Status == 'db_redir_perm' 
+			|| record.Status == 'db_unfetched' 
+			|| record.Status == 'db_redir_temp'
+			|| record.Status == 'db_gone')
+			return;
+
+		if (record.Signature != null && record.Signature != 'null') {
+
+			//If we do not have a "dupe" record, then create one with defaults
+			if (!dupes[record.Signature]) {
+				dupes[record.Signature] = {
+					primary: false,
+					dupes: []
+				};
+			}
+
+			switch(record.Status) {
+				case "db_duplicate" : {
+					dupes[record.Signature].dupes.push(record);
+					break;
+				}
+				case "db_notmodified":
+				case "db_fetched" : {
+					if (dupes[record.Signature]["primary"] !== false) {
+						console.log("Odd, there seems to be another fetched URL with the same signature: " + record.Signature);
+						console.log("Primary: " + dupes[record.Signature].primary.URL + ", Odd URL: " + record.URL);
+					} else {
+						dupes[record.Signature]["primary"] = record;
+					}
+					break;
+				}
+				default :  {
+					console.log("Dunno what to do - unexpected status - " + record.Status);
+					break;
+				}
+			}
+		} else {
+			console.log ("Bad Signature URL: (status: " + record.Status + ") " + record.URL);
+		}
+
+	});
+
+	
+
+	
+	var keys = Object.keys(dupes);
+	console.log("Before dupe identification: " + keys.length);
+
+	//Loop through dupes removing those records without a dupe
+	keys.forEach(function(key) {
+		if (dupes[key].dupes.length <= 0) {
+			delete dupes[key];
+		} 
+	});
+
+	keys = Object.keys(dupes);
+	console.log("After dupe identification: " + keys.length);
+
+	keys.forEach(function(key) {
+		console.log(key + " : " + dupes[key].primary.URL);
+		dupes[key].dupes.forEach(function(dupe) {
+			console.log("\t" + dupe.URL);
+		});
+	});
+
+
+	//TODO: Add in case sensative filter to get rid of URLs that are the same except for 
+	//casing. (e.g. they are not really different...)
+	//
+	//TODO: Add in a filter for  / and /default.aspx?
+
+}
+
+/**
+ * This takes in a string array representing the parsed CrawlDB record and turns it into an object
+ * @param  {Array} buff Array of strings representing the record.
+ * @return {[type]}      [description]
+ */
+function parseRecord(buff) {
+
+	var regex_status = /Status:\s+(\d+)\s+\(([^)]+)\)/;
+	var regex_fetchTime = /Fetch time:\s+(.+)/;
+	var regex_modifiedTime = /Modified time:\s+(.+)/;
+	var regex_retries = /Retries since fetch:\s+(\d+)/;
+	var regex_retryInterval = /Retry interval:\s+(\d+)\s+seconds\s+\(([^)]+)\)/;
+	var regex_score = /Score:\s+(.+)/;
+	var regex_signature = /Signature:\s+(.+)/;
+
+
+
+	//Default Fields of a Record
+	var record = {
+		URL: '',
+		Host: '',
+		Protocol: '',
+		StatusCode: -1,
+		Status: '',
+		FetchTime: new Date(),
+		ModifiedTime: new Date(),
+		Retries: -1,
+		RetryInterval: -1,
+		Score: -1,
+		Signature: null,
+		Metadata: {}
+	}
+
+	//Assume first element is the URL and "Version", and they are separated by a tab (\t)
+	var urlline = buff.shift().split('\t'); //Get the first line and break it up
+	record.URL = urlline[0];
+
+	//Let's extract the host & protocol from the URL
+	var url_obj = url.parse(record.URL);
+	record.Host = url_obj.host;
+	record.Protocol = url_obj.protocol;
+
+	//Now, the next element should be the "status"
+	matchLine(buff, regex_status, "Invalid Status line", function(matches) {
+		record.StatusCode = matches[1];
+		record.Status = matches[2];
+	});
+
+	//Handle Fetch time
+	matchLine(buff, regex_fetchTime, "Invalid Fetch Time", function(matches) {
+		record.FetchTime = new Date(Date.parse(matches[1]));
+	});
+
+	//Handle Modification time
+	matchLine(buff, regex_modifiedTime, "Invalid Modified Time", function(matches) {
+		record.ModifiedTime = new Date(Date.parse(matches[1]));
+	});
+
+
+	//Handle Retries
+	matchLine(buff, regex_retries, "Invalid Retries", function(matches) {
+		record.Retries = matches[1];
+	});
+
+	//Handle Retry Interval
+	matchLine(buff, regex_retryInterval, "Invalid Retry Interval", function(matches) {
+		record.RetryInterval = matches[1];
+	});
+
+	//Handle Score
+	matchLine(buff, regex_score, "Invalid Score", function(matches) {
+		record.Score = matches[1];
+	});
+
+	//Handle Signature
+	matchLine(buff, regex_signature, "Invalid Signature", function(matches) {
+		record.Signature = matches[1];
+	});
+
+
+	//Handle Metadata
+	if (buff[0] != null && buff[0] != "Metadata: ") {
+		console.log("Expected Metadata start");
+		console.log(buff[0]);
+	} else {
+		buff.shift(); //Get rid of Metadata: line
+		//TODO: Actually Parse Metadata
+		while (buff.length > 0) {
+			var keyval = cleanMetaLine(buff.shift());
+
+			if (keyval != null) {
+				record.Metadata[keyval[0]]=keyval[1];			
+			}
+		}
+	}
+
+	return record;
+}
+
+function cleanMetaLine(line) {
+
+	var regex_pst = /^([^,]+)\((\d+)\),\s+lastModified=0[:]*(.*)$/; //Basically, text except a comma, then a set of parens with a number, then more text
+
+	//Get the index of the first equal sign that splits the key from the value
+	var keyseppos = line.indexOf("=");
+
+	if (keyseppos == -1) {
+		console.log("No separator: " + line);
+		return null;
+	}
+
+	var key = line.substring(0, keyseppos);
+	key = key.replace(/\s+/, ""); //Clean up preceeding tabs and spaces
+	var value = line.substring(keyseppos + 1, line.length);
+
+	if (key == "_pst_") {
+		//This value should start with something like "success(number)," or "exception(number),"
+		var matches = value.match(regex_pst);
+		if (matches != null) {
+			var status = matches[1];
+			var status_code = matches[2];
+			var therest = matches[3];
+
+			//console.log("Status: " + status);
+			//console.log("Contents: " + therest.replace(/^\s+/, ""));
+		} else {
+			console.log("PST metadata value different than expected:");
+			console.log("\t" + value);
+		}
+	}
+
+	return [key, value];
+}
+
+/**
+ * Helper function to parse a line of a crawldb record
+ * @param  {[type]}   buffer   The array of lines representing the record
+ * @param  {[type]}   regex    The regex to use to pull out matches
+ * @param  {[type]}   errMsg   The error message to display if no matches
+ * @param  {Function} callback The callback to handle matches
+ */
+function matchLine(buffer, regex, errMsg, callback) {
+	var line = buffer.shift();
+	var matches = line.match(regex);
+	if (matches != null) {
+		callback(matches);
+	} else {
+		console.log(errMsg);
+		console.log(line);
+	}
+}
+
